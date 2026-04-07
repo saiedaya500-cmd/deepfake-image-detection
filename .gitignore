@@ -1,0 +1,7 @@
+dataset/
+training_real/
+training_fake/
+*.zip
+*.pth
+__pycache__/
+*.pyc
