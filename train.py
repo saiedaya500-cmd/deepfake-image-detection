@@ -11,16 +11,22 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device:", DEVICE)
 
 DATA_DIR = "dataset"
-BATCH_SIZE = 16   # CPU -> plus sûr
+BATCH_SIZE = 8
 IMG_SIZE = 224
-EPOCHS = 10      # Pour premier test rapide
+EPOCHS = 10
 LR = 1e-4
 
 train_transform = transforms.Compose([
-    transforms.Resize((IMG_SIZE, IMG_SIZE)),
-    transforms.RandomHorizontalFlip(),
+    transforms.Resize((256, 256)),
+    transforms.RandomResizedCrop(IMG_SIZE, scale=(0.9, 1.0)),
+    transforms.RandomHorizontalFlip(p=0.5),
     transforms.RandomRotation(5),
-    transforms.ColorJitter(brightness=0.1, contrast=0.1),
+    transforms.ColorJitter(
+        brightness=0.1,
+        contrast=0.1,
+        saturation=0.1,
+        hue=0.01
+    ),
     transforms.ToTensor(),
     transforms.Normalize([0.485, 0.456, 0.406],
                          [0.229, 0.224, 0.225]),
@@ -33,7 +39,6 @@ eval_transform = transforms.Compose([
                          [0.229, 0.224, 0.225]),
 ])
 
-# Datasets
 train_ds = datasets.ImageFolder(os.path.join(DATA_DIR, "train"), transform=train_transform)
 val_ds   = datasets.ImageFolder(os.path.join(DATA_DIR, "val"), transform=eval_transform)
 test_ds  = datasets.ImageFolder(os.path.join(DATA_DIR, "test"), transform=eval_transform)
@@ -41,26 +46,40 @@ test_ds  = datasets.ImageFolder(os.path.join(DATA_DIR, "test"), transform=eval_t
 print("Classes:", train_ds.class_to_idx)
 print(f"Train: {len(train_ds)} | Val: {len(val_ds)} | Test: {len(test_ds)}")
 
-train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
-val_loader   = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
-test_loader  = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
+train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=0, pin_memory=True)
+val_loader   = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0, pin_memory=True)
+test_loader  = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0, pin_memory=True)
 
-# Modèle baseline
 model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+
+for param in model.parameters():
+    param.requires_grad = False
+
+for param in model.layer4.parameters():
+    param.requires_grad = True
+
 num_features = model.fc.in_features
 model.fc = nn.Linear(num_features, 1)
+
+for param in model.fc.parameters():
+    param.requires_grad = True
+
 model = model.to(DEVICE)
 
 criterion = nn.BCEWithLogitsLoss()
-optimizer = optim.Adam(model.parameters(), lr=LR)
+
+optimizer = optim.Adam(
+    filter(lambda p: p.requires_grad, model.parameters()),
+    lr=LR
+)
 
 def train_one_epoch(model, loader):
     model.train()
     total_loss = 0.0
 
     for images, labels in loader:
-        images = images.to(DEVICE)
-        labels = labels.float().unsqueeze(1).to(DEVICE)
+        images = images.to(DEVICE, non_blocking=True)
+        labels = labels.float().unsqueeze(1).to(DEVICE, non_blocking=True)
 
         optimizer.zero_grad()
         outputs = model(images)
@@ -80,8 +99,8 @@ def evaluate(model, loader):
     all_probs = []
 
     for images, labels in loader:
-        images = images.to(DEVICE)
-        labels_float = labels.float().unsqueeze(1).to(DEVICE)
+        images = images.to(DEVICE, non_blocking=True)
+        labels_float = labels.float().unsqueeze(1).to(DEVICE, non_blocking=True)
 
         outputs = model(images)
         loss = criterion(outputs, labels_float)
