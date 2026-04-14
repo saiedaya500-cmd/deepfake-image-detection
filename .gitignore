@@ -5,3 +5,7 @@ training_fake/
 *.pth
 __pycache__/
 *.pyc
+venv/
+*.jpg
+*.png
+__pycache__/
